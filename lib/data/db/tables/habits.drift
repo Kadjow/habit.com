@@ -1,0 +1,29 @@
+CREATE TABLE habits (
+  id TEXT NOT NULL PRIMARY KEY,
+  title TEXT NOT NULL,
+  is_active BOOLEAN NOT NULL DEFAULT 1,
+  difficulty INTEGER NOT NULL DEFAULT 1,
+  created_at DATETIME NOT NULL
+);
+
+CREATE TABLE checkins (
+  id TEXT NOT NULL PRIMARY KEY,
+  habit_id TEXT NOT NULL REFERENCES habits(id),
+  date_key TEXT NOT NULL,
+  status INTEGER NOT NULL,
+  created_at DATETIME NOT NULL
+);
+
+CREATE INDEX idx_checkins_habit_id ON checkins(habit_id);
+CREATE INDEX idx_checkins_habit_date ON checkins (habit_id, date_key);
+
+CREATE TABLE adjustments (
+  id TEXT NOT NULL PRIMARY KEY,
+  habit_id TEXT NOT NULL REFERENCES habits(id),
+  date_key TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  payload TEXT NOT NULL,
+  created_at DATETIME NOT NULL
+);
+
+CREATE INDEX idx_adjustments_habit_id ON adjustments(habit_id);
