@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import 'router.dart';
+import '../features/auth/auth_gate.dart';
 
 class App extends StatelessWidget {
   const App({super.key});
@@ -8,12 +8,9 @@ class App extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Habit AI',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal),
-        useMaterial3: true,
-      ),
-      onGenerateRoute: AppRouter.onGenerateRoute,
+      title: 'habit_ai',
+      theme: ThemeData(useMaterial3: true),
+      home: const AuthGate(),
     );
   }
 }

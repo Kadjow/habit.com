@@ -1,114 +1,223 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../app/providers.dart';
 import 'home_controller.dart';
+import 'habit_details_page.dart';
 
 class HomePage extends ConsumerWidget {
   const HomePage({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final habitsState = ref.watch(homeControllerProvider);
-    final colorScheme = Theme.of(context).colorScheme;
+    final state = ref.watch(homeControllerProvider);
+    final controller = ref.read(homeControllerProvider.notifier);
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Habit AI'),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Habits'),
+            Consumer(
+              builder: (context, ref, _) {
+                final uid = ref.watch(authUserIdProvider);
+                final email = ref.watch(authUserEmailProvider);
+                return Text(
+                  '${email ?? '-'} | ${uid?.substring(0, 8) ?? '-'}',
+                  style: Theme.of(context).textTheme.labelSmall,
+                );
+              },
+            ),
+          ],
+        ),
+        actions: [
+          IconButton(
+            onPressed: () async {
+              await Supabase.instance.client.auth
+                  .signOut(scope: SignOutScope.global);
+            },
+            icon: const Icon(Icons.logout),
+          ),
+        ],
       ),
-      body: habitsState.when(
+      body: state.when(
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (error, _) => Center(child: Text('Erro: $error')),
-        data: (state) {
-          return ListView.separated(
-            padding: const EdgeInsets.all(16),
-            itemCount: state.habits.length,
-            separatorBuilder: (_, __) => const Divider(height: 24),
-            itemBuilder: (context, index) {
-              final habit = state.habits[index];
-              final status = state.todayStatusByHabitId[habit.id] ?? 0;
-              final rhythm = state.rhythm14DaysByHabitId[habit.id] ?? 0.0;
-              final rhythmPercent = (rhythm * 100).round();
-              final isDone = status == 1;
-              final isMinDone = status == 2;
-
-              return Card(
-                elevation: 0,
-                color: colorScheme.surfaceVariant.withOpacity(0.4),
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+        error: (e, _) => Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.wifi_off, size: 32),
+                const SizedBox(height: 12),
+                Text(
+                  'Não foi possível carregar seus hábitos.',
+                  style: Theme.of(context).textTheme.titleMedium,
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  '$e',
+                  style: Theme.of(context).textTheme.bodySmall,
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 12),
+                FilledButton(
+                  onPressed: () => controller.load(),
+                  child: const Text('Tentar novamente'),
+                ),
+              ],
+            ),
+          ),
+        ),
+        data: (s) {
+          return RefreshIndicator(
+            onRefresh: () async => controller.load(),
+            child: s.habits.isEmpty
+                ? ListView(
                     children: [
-                      Text(
-                        habit.title,
-                        style: Theme.of(context).textTheme.titleMedium,
-                      ),
-                      const SizedBox(height: 12),
-                      Text('Ritmo 14 dias: $rhythmPercent%'),
-                      const SizedBox(height: 8),
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(8),
-                        child: LinearProgressIndicator(
-                          value: rhythm,
-                          minHeight: 8,
-                          backgroundColor: colorScheme.surfaceVariant,
+                      const SizedBox(height: 120),
+                      Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(24),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Text('Nenhum hábito ainda'),
+                              const SizedBox(height: 12),
+                              FilledButton(
+                                onPressed: () =>
+                                    _showCreateHabitSheet(context, ref),
+                                child: const Text('Novo hábito'),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
-                      const SizedBox(height: 16),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: FilledButton(
-                              onPressed: () {
-                                ref
-                                    .read(homeControllerProvider.notifier)
-                                    .toggleCheckin(habit.id, 1);
-                              },
-                              style: FilledButton.styleFrom(
-                                backgroundColor: isDone
-                                    ? colorScheme.primary
-                                    : colorScheme.surfaceVariant,
-                                foregroundColor: isDone
-                                    ? colorScheme.onPrimary
-                                    : colorScheme.onSurfaceVariant,
-                              ),
-                              child: const Text('Feito'),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: OutlinedButton(
-                              onPressed: () {
-                                ref
-                                    .read(homeControllerProvider.notifier)
-                                    .toggleCheckin(habit.id, 2);
-                              },
-                              style: OutlinedButton.styleFrom(
-                                side: BorderSide(
-                                  color: isMinDone
-                                      ? colorScheme.primary
-                                      : colorScheme.outline,
-                                ),
-                                foregroundColor: isMinDone
-                                    ? colorScheme.primary
-                                    : colorScheme.onSurface,
-                              ),
-                              child: const Text('Mínimo'),
-                            ),
-                          ),
-                        ],
-                      ),
                     ],
+                  )
+                : ListView.separated(
+                    padding: const EdgeInsets.all(16),
+                    itemCount: s.habits.length,
+                    separatorBuilder: (context, index) =>
+                        const SizedBox(height: 12),
+                    itemBuilder: (context, index) {
+                      final habit = s.habits[index];
+                      final status = s.todayStatusByHabitId[habit.id] ?? 0;
+                      final rhythm = s.rhythm14DaysByHabitId[habit.id] ?? 0.0;
+                      final rhythmPercent = (rhythm * 100).round();
+
+                      final isDone = status == 1;
+                      final isMinDone = status == 2;
+
+                      return Card(
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(12),
+                          onTap: () {
+                            Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) =>
+                                    HabitDetailsPage(habit: habit),
+                              ),
+                            );
+                          },
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      habit.title,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .titleMedium,
+                                    ),
+                                  ),
+                                  if (controller.isRefreshing)
+                                    const SizedBox(
+                                      width: 16,
+                                      height: 16,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              Text('Ritmo 14 dias: $rhythmPercent%'),
+                              const SizedBox(height: 8),
+                              LinearProgressIndicator(value: rhythm),
+                              const SizedBox(height: 12),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: FilledButton(
+                                      onPressed: () async {
+                                        try {
+                                          await ref
+                                              .read(homeControllerProvider
+                                                  .notifier)
+                                              .toggleCheckin(habit.id, 1);
+                                        } catch (_) {
+                                          if (context.mounted) {
+                                            ScaffoldMessenger.of(context)
+                                                .showSnackBar(
+                                              const SnackBar(
+                                                content: Text(
+                                                    'Falha ao salvar. Tente novamente.'),
+                                              ),
+                                            );
+                                          }
+                                        }
+                                      },
+                                      child: Text(isDone ? 'Feito \u2713' : 'Feito'),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: OutlinedButton(
+                                      onPressed: () async {
+                                        try {
+                                          await ref
+                                              .read(homeControllerProvider
+                                                  .notifier)
+                                              .toggleCheckin(habit.id, 2);
+                                        } catch (_) {
+                                          if (context.mounted) {
+                                            ScaffoldMessenger.of(context)
+                                                .showSnackBar(
+                                              const SnackBar(
+                                                content: Text(
+                                                    'Falha ao salvar. Tente novamente.'),
+                                              ),
+                                            );
+                                          }
+                                        }
+                                      },
+                                      child: Text(
+                                          isMinDone ? 'Mínimo \u2713' : 'Mínimo'),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      );
+                    },
                   ),
-                ),
-              );
-            },
           );
         },
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _showCreateHabitSheet(context, ref),
-        label: const Text('Novo hábito'),
+        label: const Text('Novo h\u00e1bito'),
         icon: const Icon(Icons.add),
       ),
     );
@@ -136,14 +245,14 @@ class HomePage extends ConsumerWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Novo hábito',
+                    'Novo h\u00e1bito',
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                   const SizedBox(height: 12),
                   TextField(
                     controller: textController,
                     decoration: const InputDecoration(
-                      labelText: 'Nome do hábito',
+                      labelText: 'Nome do h\u00e1bito',
                       border: OutlineInputBorder(),
                     ),
                   ),
@@ -163,15 +272,11 @@ class HomePage extends ConsumerWidget {
                     child: FilledButton(
                       onPressed: () async {
                         final title = textController.text.trim();
-                        if (title.isEmpty) {
-                          return;
-                        }
+                        if (title.isEmpty) return;
                         await ref
                             .read(homeControllerProvider.notifier)
                             .createHabit(title, difficulty.round());
-                        if (context.mounted) {
-                          Navigator.of(context).pop();
-                        }
+                        if (context.mounted) Navigator.of(context).pop();
                       },
                       child: const Text('Salvar'),
                     ),
