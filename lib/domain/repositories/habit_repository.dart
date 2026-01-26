@@ -14,4 +14,5 @@ abstract class HabitRepository {
   );
   Future<CheckIn?> getCheckinForDate(String habitId, String dateKey);
   Future<void> upsertCheckinForDate(String habitId, String dateKey, int status);
+  Future<void> upsertCheckinForDateKey(String habitId, String dateKey, int status);
 }

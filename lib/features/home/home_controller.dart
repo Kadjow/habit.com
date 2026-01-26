@@ -43,6 +43,7 @@ Map<String, dynamic> _buildHomeMetrics(Map<String, dynamic> input) {
   return {
     'todayStatusByHabitId': todayStatusByHabitId,
     'rhythm14DaysByHabitId': rhythm14DaysByHabitId,
+    'checkinsByHabitId': byHabit,
   };
 }
 
@@ -50,11 +51,13 @@ class HomeState {
   final List<Habit> habits;
   final Map<String, int> todayStatusByHabitId;
   final Map<String, double> rhythm14DaysByHabitId;
+  final Map<String, Map<String, int>> checkinsByHabitId;
 
   const HomeState({
     required this.habits,
     required this.todayStatusByHabitId,
     required this.rhythm14DaysByHabitId,
+    required this.checkinsByHabitId,
   });
 }
 
@@ -71,6 +74,15 @@ class HomeController extends StateNotifier<AsyncValue<HomeState>> {
   final HabitRepository _repository;
   final String? _uid;
   bool _loading = false;
+  bool _syncPending = false;
+  bool _inLoad = false;
+
+  // Debug counters (useful for tests)
+  @visibleForTesting
+  int debugLoadCalls = 0;
+
+  @visibleForTesting
+  int debugSilentRefreshRuns = 0;
 
   HomeController(this._repository, this._uid)
       : super(const AsyncValue.loading()) {
@@ -79,6 +91,7 @@ class HomeController extends StateNotifier<AsyncValue<HomeState>> {
         habits: [],
         todayStatusByHabitId: {},
         rhythm14DaysByHabitId: {},
+        checkinsByHabitId: {},
       ));
       return;
     }
@@ -87,8 +100,31 @@ class HomeController extends StateNotifier<AsyncValue<HomeState>> {
 
   bool get isRefreshing => _loading;
 
+  // Evita load() pesado em sequência (ex: vários taps no grid).
+  // Faz um refresh silencioso com debounce.
+  void scheduleSilentRefresh({Duration delay = const Duration(milliseconds: 600)}) {
+    if (_syncPending) return;
+    _syncPending = true;
+    Future.delayed(delay, () async {
+      _syncPending = false;
+      if (!mounted) return;
+      try {
+        debugSilentRefreshRuns++;
+        await load(); // refresh geral (silencioso)
+      } catch (_) {
+        // Sem crash: refresh é "best effort"
+      }
+    });
+  }
+
   Future<void> load() async {
+    // Validação automática: se existir recursão (load chamando load),
+    // isso quebra em debug/test e fica óbvio.
+    assert(!_inLoad, 'HomeController.load() called recursively. '
+        'Never call load() from inside load(). Use scheduleSilentRefresh().');
     if (_loading) return;
+    _inLoad = true;
+    debugLoadCalls++;
     _loading = true;
     // UX: evita "piscar" a tela toda vez que carrega.
     // Se ja ha dados, mantemos e carregamos em background.
@@ -102,6 +138,7 @@ class HomeController extends StateNotifier<AsyncValue<HomeState>> {
           habits: [],
           todayStatusByHabitId: {},
           rhythm14DaysByHabitId: {},
+          checkinsByHabitId: {},
         ));
         return;
       }
@@ -113,6 +150,7 @@ class HomeController extends StateNotifier<AsyncValue<HomeState>> {
           habits: [],
           todayStatusByHabitId: {},
           rhythm14DaysByHabitId: {},
+          checkinsByHabitId: {},
         ));
         return;
       }
@@ -149,11 +187,19 @@ class HomeController extends StateNotifier<AsyncValue<HomeState>> {
           (out['todayStatusByHabitId'] as Map).cast<String, int>();
       final rhythm14DaysByHabitId =
           (out['rhythm14DaysByHabitId'] as Map).cast<String, double>();
+      final checkinsByHabitId =
+          (out['checkinsByHabitId'] as Map).map<String, Map<String, int>>(
+        (hid, v) => MapEntry(
+          hid as String,
+          (v as Map).cast<String, int>(),
+        ),
+      );
 
       state = AsyncValue.data(HomeState(
         habits: habits,
         todayStatusByHabitId: todayStatusByHabitId,
         rhythm14DaysByHabitId: rhythm14DaysByHabitId,
+        checkinsByHabitId: checkinsByHabitId,
       ));
     } catch (e, st) {
       if (!mounted) return;
@@ -166,6 +212,7 @@ class HomeController extends StateNotifier<AsyncValue<HomeState>> {
       rethrow;
     } finally {
       _loading = false;
+      _inLoad = false;
     }
   }
 
@@ -175,40 +222,57 @@ class HomeController extends StateNotifier<AsyncValue<HomeState>> {
 
     final todayKey = toDateKey(todayLocal());
     final current = currentState.todayStatusByHabitId[habitId] ?? 0;
-    final nextStatus = current == status ? 0 : status;
+    final nextStatus = (current == status) ? 0 : status;
 
-    // UX: optimistic update (responde na hora)
-    final optimisticStatus =
-        Map<String, int>.from(currentState.todayStatusByHabitId)
-          ..[habitId] = nextStatus;
+    await setCheckinForDate(habitId, todayKey, nextStatus);
+  }
 
-    // Recalcula ritmo localmente para NAO precisar recarregar tudo.
-    // (mantem simples: assume 14 dias e ajusta so o "hoje")
-    final optimisticRhythm =
-        Map<String, double>.from(currentState.rhythm14DaysByHabitId);
+  Future<void> setCheckinForDate(String habitId, String dateKey, int nextStatus) async {
+    final currentState = state.value;
+    if (currentState == null || _uid == null) return;
 
-    // Aproximacao: ajusta o ritmo com base no estado do "hoje" apenas.
-    // Como ainda temos os checkins no backend, faremos um refresh silencioso depois.
-    final prevRhythm = optimisticRhythm[habitId] ?? 0.0;
-    // Nao tentamos calcular com precisao perfeita aqui; so melhora UX.
-    // O refresh silencioso logo apos garante consistencia.
-    optimisticRhythm[habitId] = prevRhythm;
+    final updatedByHabit =
+        Map<String, Map<String, int>>.from(currentState.checkinsByHabitId);
+    final byDate =
+        Map<String, int>.from(updatedByHabit[habitId] ?? <String, int>{});
+
+    // optimistic
+    byDate[dateKey] = nextStatus;
+    updatedByHabit[habitId] = byDate;
+
+    final today = todayLocal();
+    final todayKey = toDateKey(today);
+
+    // today status
+    final updatedToday = Map<String, int>.from(currentState.todayStatusByHabitId)
+      ..[habitId] = byDate[todayKey] ?? 0;
+
+    // rhythm 14d
+    var doneCount = 0;
+    for (var i = 0; i < 14; i++) {
+      final dk = toDateKey(today.subtract(Duration(days: i)));
+      final s = byDate[dk] ?? 0;
+      if (s == 1 || s == 2) doneCount++;
+    }
+    final updatedRhythm =
+        Map<String, double>.from(currentState.rhythm14DaysByHabitId)
+          ..[habitId] = doneCount / 14.0;
 
     state = AsyncValue.data(HomeState(
       habits: currentState.habits,
-      todayStatusByHabitId: optimisticStatus,
-      rhythm14DaysByHabitId: optimisticRhythm,
+      todayStatusByHabitId: updatedToday,
+      rhythm14DaysByHabitId: updatedRhythm,
+      checkinsByHabitId: updatedByHabit,
     ));
 
     try {
-      await _repository.upsertCheckinForDate(habitId, todayKey, nextStatus);
+      await _repository.upsertCheckinForDateKey(habitId, dateKey, nextStatus);
       if (!mounted) return;
-      // Refresh silencioso para ficar 100% consistente (sem piscar)
-      await load();
+      // NÃO faz load() aqui — evita travar a UI.
+      // Se quiser consistência 100% do backend, use scheduleSilentRefresh()
     } catch (_) {
       if (!mounted) return;
-      // Reverte se falhar
-      state = AsyncValue.data(currentState);
+      state = AsyncValue.data(currentState); // rollback
       rethrow;
     }
   }

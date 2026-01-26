@@ -162,4 +162,24 @@ class HabitRepositorySupabase implements HabitRepository {
       onConflict: 'user_id,habit_id,date_key',
     );
   }
+
+  @override
+  Future<void> upsertCheckinForDateKey(
+    String habitId,
+    String dateKey,
+    int status,
+  ) async {
+    final uid = _uidOrThrow();
+
+    await _client.from('checkins').upsert(
+      {
+        'user_id': uid,
+        'habit_id': habitId,
+        'date_key': dateKey,
+        'date': fromDateKey(dateKey).toIso8601String(),
+        'status': status,
+      },
+      onConflict: 'user_id,habit_id,date_key',
+    );
+  }
 }

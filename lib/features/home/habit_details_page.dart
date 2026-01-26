@@ -60,6 +60,7 @@ class HabitDetailsPage extends ConsumerWidget {
           final statusToday = s.todayStatusByHabitId[habit.id] ?? 0;
           final rhythm = s.rhythm14DaysByHabitId[habit.id] ?? 0.0;
           final rhythmPercent = (rhythm * 100).round();
+          final map = s.checkinsByHabitId[habit.id] ?? const <String, int>{};
 
           return ListView(
             padding: const EdgeInsets.all(16),
@@ -103,14 +104,8 @@ class HabitDetailsPage extends ConsumerWidget {
                 ),
                 itemBuilder: (context, index) {
                   final day = days[index];
-                  // OBS: No seu state atual, voce guarda status "de hoje" + rhythm.
-                  // Para detalhar dia-a-dia, precisamos buscar por dia (ou manter cache).
-                  // Entao aqui vamos usar um padrao:
-                  // - Hoje: usa statusToday
-                  // - Outros dias: apenas visual neutro (por enquanto)
-                  // E ao clicar, a gente marca o dia no backend e da load().
-                  final isToday = index == 0;
-                  final status = isToday ? statusToday : 0;
+                  final key = toDateKey(day);
+                  final status = map[key] ?? (index == 0 ? statusToday : 0);
 
                   return InkWell(
                     borderRadius: BorderRadius.circular(12),
@@ -118,24 +113,9 @@ class HabitDetailsPage extends ConsumerWidget {
                       // Toggle ciclo: 0 -> 2 (minimo) -> 1 (feito) -> 0
                       final next = _nextStatus(status);
                       try {
-                        // Reaproveita o mesmo metodo do controller (salva "hoje").
-                        // Para salvar dia especifico, precisaríamos de outro metodo.
-                        // Aqui, quando for hoje, funciona 100%.
-                        // Proximo passo: criar toggle para dateKey.
-                        if (isToday) {
-                          await controller.toggleCheckin(habit.id, next == 1 ? 1 : 2);
-                        } else {
-                          // Placeholder UX: por enquanto so avisa.
-                          if (context.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text(
-                                  'Proximo passo: habilitar toggle por dia (nao so hoje).',
-                                ),
-                              ),
-                            );
-                          }
-                        }
+                        await controller.setCheckinForDate(habit.id, key, next);
+                        // refresh leve (debounce) para puxar backend sem travar UI
+                        controller.scheduleSilentRefresh();
                       } catch (_) {
                         if (context.mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(
@@ -151,44 +131,59 @@ class HabitDetailsPage extends ConsumerWidget {
                           color: Theme.of(context).dividerColor,
                         ),
                       ),
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+                      padding: EdgeInsets.zero,
                       child: LayoutBuilder(
                         builder: (context, constraints) {
-                          // Ajusta tamanhos para caber em qualquer tile (evita overflow).
+                          // Tiles podem ficar ~33x33 no crossAxisCount: 7
+                          // Stack evita RenderFlex overflow (Column).
                           final h = constraints.maxHeight;
-                          final dayFont = h >= 52 ? 14.0 : (h >= 44 ? 13.0 : 12.0);
-                          final weekFont = h >= 52 ? 11.0 : 10.0;
-                          final iconSize = h >= 52 ? 18.0 : 16.0;
-                          final gap1 = h >= 52 ? 2.0 : 1.0;
-                          final gap2 = h >= 52 ? 3.0 : 2.0;
+                          final isTiny = h <= 36;
 
-                          return Center(
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text(
+                          final dayFont = isTiny ? 11.0 : (h < 48 ? 12.0 : 14.0);
+                          final weekFont = isTiny ? 9.0 : 10.0;
+                          final iconSize = isTiny ? 14.0 : 16.0;
+
+                          return Stack(
+                            children: [
+                              Positioned(
+                                left: 4,
+                                top: 3,
+                                child: Text(
                                   '${day.day}',
                                   maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
+                                  overflow: TextOverflow.clip,
                                   style: Theme.of(context)
                                       .textTheme
                                       .labelLarge
                                       ?.copyWith(fontSize: dayFont),
                                 ),
-                                SizedBox(height: gap1),
-                                Text(
+                              ),
+                              Positioned(
+                                right: 4,
+                                top: 5,
+                                child: Text(
                                   _shortWeekday(day),
                                   maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
+                                  overflow: TextOverflow.clip,
                                   style: Theme.of(context)
                                       .textTheme
                                       .labelSmall
                                       ?.copyWith(fontSize: weekFont),
                                 ),
-                                SizedBox(height: gap2),
-                                _statusDot(context, status, size: iconSize),
-                              ],
-                            ),
+                              ),
+                              Positioned(
+                                left: 0,
+                                right: 0,
+                                bottom: 3,
+                                child: Center(
+                                  child: _statusDot(
+                                    context,
+                                    status,
+                                    size: iconSize,
+                                  ),
+                                ),
+                              ),
+                            ],
                           );
                         },
                       ),
