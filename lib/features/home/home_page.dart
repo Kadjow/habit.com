@@ -3,6 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../app/providers.dart';
+import '../../ui/widgets/empty_state.dart';
+import '../../ui/widgets/habit_status_chip.dart';
+import '../../ui/widgets/section_header.dart';
 import 'home_controller.dart';
 import 'habit_details_page.dart';
 
@@ -51,32 +54,13 @@ class HomePage extends ConsumerWidget {
       ),
       body: state.when(
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Icons.wifi_off, size: 32),
-                const SizedBox(height: 12),
-                Text(
-                  'Não foi possível carregar seus hábitos.',
-                  style: Theme.of(context).textTheme.titleMedium,
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  '$e',
-                  style: Theme.of(context).textTheme.bodySmall,
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 12),
-                FilledButton(
-                  onPressed: () => controller.load(),
-                  child: const Text('Tentar novamente'),
-                ),
-              ],
-            ),
+        error: (e, _) => EmptyState(
+          title: 'Falha ao carregar',
+          subtitle: e.toString(),
+          icon: Icons.error_outline,
+          action: FilledButton(
+            onPressed: () => controller.load(),
+            child: const Text('Tentar novamente'),
           ),
         ),
         data: (s) {
@@ -85,33 +69,29 @@ class HomePage extends ConsumerWidget {
             child: s.habits.isEmpty
                 ? ListView(
                     children: [
-                      const SizedBox(height: 120),
-                      Center(
-                        child: Padding(
-                          padding: const EdgeInsets.all(24),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Text('Nenhum hábito ainda'),
-                              const SizedBox(height: 12),
-                              FilledButton(
-                                onPressed: () =>
-                                    _showCreateHabitSheet(context, ref),
-                                child: const Text('Novo hábito'),
-                              ),
-                            ],
-                          ),
+                      const SizedBox(height: 80),
+                      EmptyState(
+                        title: 'Nenhum hábito ainda',
+                        subtitle: 'Crie seu primeiro hábito para começar.',
+                        icon: Icons.auto_awesome_outlined,
+                        action: FilledButton(
+                          onPressed: () => _showCreateHabitSheet(context, ref),
+                          child: const Text('Novo hábito'),
                         ),
                       ),
                     ],
                   )
                 : ListView.separated(
                     padding: const EdgeInsets.all(16),
-                    itemCount: s.habits.length,
+                    itemCount: s.habits.length + 1,
                     separatorBuilder: (context, index) =>
                         const SizedBox(height: 12),
                     itemBuilder: (context, index) {
-                      final habit = s.habits[index];
+                      if (index == 0) {
+                        return const SectionHeader('Hoje');
+                      }
+
+                      final habit = s.habits[index - 1];
                       final status = s.todayStatusByHabitId[habit.id] ?? 0;
                       final rhythm = s.rhythm14DaysByHabitId[habit.id] ?? 0.0;
                       final rhythmPercent = (rhythm * 100).round();
@@ -145,7 +125,9 @@ class HomePage extends ConsumerWidget {
                                           .titleMedium,
                                     ),
                                   ),
-                                  if (controller.isRefreshing)
+                                  HabitStatusChip(status: status),
+                                  if (controller.isRefreshing) ...[
+                                    const SizedBox(width: 8),
                                     const SizedBox(
                                       width: 16,
                                       height: 16,
@@ -153,6 +135,7 @@ class HomePage extends ConsumerWidget {
                                         strokeWidth: 2,
                                       ),
                                     ),
+                                  ],
                                 ],
                               ),
                               const SizedBox(height: 8),

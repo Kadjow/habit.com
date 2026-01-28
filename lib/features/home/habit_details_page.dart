@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/time/date_only.dart';
 import '../../domain/models/habit.dart';
+import '../../ui/widgets/habit_status_chip.dart';
+import '../../ui/widgets/section_header.dart';
 import 'home_controller.dart';
 
 class HabitDetailsPage extends ConsumerWidget {
@@ -123,6 +125,18 @@ class _BodyWithState extends StatelessWidget {
           style: Theme.of(context).textTheme.titleMedium,
         ),
         const SizedBox(height: 8),
+        const SectionHeader('Legenda'),
+        const SizedBox(height: 8),
+        const Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            HabitStatusChip(status: 1),
+            HabitStatusChip(status: 2),
+            HabitStatusChip(status: 0),
+          ],
+        ),
+        const SizedBox(height: 12),
 
         // Grid simples: 7 colunas, 2 linhas
         GridView.builder(
