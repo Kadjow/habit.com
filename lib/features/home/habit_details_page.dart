@@ -19,7 +19,17 @@ class HabitDetailsPage extends ConsumerWidget {
         title: Text(habit.title),
       ),
       body: state.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
+        loading: () {
+          final previous = state.value;
+          if (previous != null) {
+            return _BodyWithState(
+              state: previous,
+              habit: habit,
+              controller: controller,
+            );
+          }
+          return const Center(child: CircularProgressIndicator());
+        },
         error: (e, _) => Center(
           child: Padding(
             padding: const EdgeInsets.all(24),
@@ -48,153 +58,172 @@ class HabitDetailsPage extends ConsumerWidget {
             ),
           ),
         ),
-        data: (s) {
-          final today = todayLocal();
+        data: (s) => _BodyWithState(
+          state: s,
+          habit: habit,
+          controller: controller,
+        ),
+      ),
+    );
+  }
+}
 
-          // 14 dias: hoje -> 13 dias atras
-          final days = List<DateTime>.generate(
-            14,
-            (i) => today.subtract(Duration(days: i)),
-          );
+class _BodyWithState extends StatelessWidget {
+  final HomeState state;
+  final Habit habit;
+  final HomeController controller;
 
-          final statusToday = s.todayStatusByHabitId[habit.id] ?? 0;
-          final rhythm = s.rhythm14DaysByHabitId[habit.id] ?? 0.0;
-          final rhythmPercent = (rhythm * 100).round();
-          final map = s.checkinsByHabitId[habit.id] ?? const <String, int>{};
+  const _BodyWithState({
+    required this.state,
+    required this.habit,
+    required this.controller,
+  });
 
-          return ListView(
+  @override
+  Widget build(BuildContext context) {
+    final today = todayLocal();
+
+    // 14 dias: hoje -> 13 dias atras
+    final days = List<DateTime>.generate(
+      14,
+      (i) => today.subtract(Duration(days: i)),
+    );
+
+    final statusToday = state.todayStatusByHabitId[habit.id] ?? 0;
+    final rhythm = state.rhythm14DaysByHabitId[habit.id] ?? 0.0;
+    final rhythmPercent = (rhythm * 100).round();
+    final map = state.checkinsByHabitId[habit.id] ?? const <String, int>{};
+
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        Card(
+          child: Padding(
             padding: const EdgeInsets.all(16),
-            children: [
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Resumo',
-                        style: Theme.of(context).textTheme.titleMedium,
-                      ),
-                      const SizedBox(height: 8),
-                      Text('Hoje: ${_statusLabel(statusToday)}'),
-                      const SizedBox(height: 8),
-                      Text('Ritmo 14 dias: $rhythmPercent%'),
-                      const SizedBox(height: 8),
-                      LinearProgressIndicator(value: rhythm),
-                    ],
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Resumo',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 8),
+                Text('Hoje: ${_statusLabel(statusToday)}'),
+                const SizedBox(height: 8),
+                Text('Ritmo 14 dias: $rhythmPercent%'),
+                const SizedBox(height: 8),
+                LinearProgressIndicator(value: rhythm),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Text(
+          'Ultimos 14 dias',
+          style: Theme.of(context).textTheme.titleMedium,
+        ),
+        const SizedBox(height: 8),
+
+        // Grid simples: 7 colunas, 2 linhas
+        GridView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: days.length,
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 7,
+            crossAxisSpacing: 8,
+            mainAxisSpacing: 8,
+          ),
+          itemBuilder: (context, index) {
+            final day = days[index];
+            final key = toDateKey(day);
+            final status = map[key] ?? (index == 0 ? statusToday : 0);
+
+            return InkWell(
+              borderRadius: BorderRadius.circular(12),
+              onTap: () async {
+                // Toggle ciclo: 0 -> 2 (minimo) -> 1 (feito) -> 0
+                final next = _nextStatus(status);
+                try {
+                  await controller.setCheckinForDate(habit.id, key, next);
+                  // refresh leve (debounce) para puxar backend sem travar UI
+                  controller.scheduleSilentRefresh();
+                } catch (_) {
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Falha ao salvar.')),
+                    );
+                  }
+                }
+              },
+              child: Container(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: Theme.of(context).dividerColor,
                   ),
                 ),
-              ),
-              const SizedBox(height: 12),
-              Text(
-                'Ultimos 14 dias',
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              const SizedBox(height: 8),
+                padding: EdgeInsets.zero,
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    // Tiles podem ficar ~33x33 no crossAxisCount: 7
+                    // Stack evita RenderFlex overflow (Column).
+                    final h = constraints.maxHeight;
+                    final isTiny = h <= 36;
 
-              // Grid simples: 7 colunas, 2 linhas
-              GridView.builder(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                itemCount: days.length,
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 7,
-                  crossAxisSpacing: 8,
-                  mainAxisSpacing: 8,
-                ),
-                itemBuilder: (context, index) {
-                  final day = days[index];
-                  final key = toDateKey(day);
-                  final status = map[key] ?? (index == 0 ? statusToday : 0);
+                    final dayFont = isTiny ? 11.0 : (h < 48 ? 12.0 : 14.0);
+                    final weekFont = isTiny ? 9.0 : 10.0;
+                    final iconSize = isTiny ? 14.0 : 16.0;
 
-                  return InkWell(
-                    borderRadius: BorderRadius.circular(12),
-                    onTap: () async {
-                      // Toggle ciclo: 0 -> 2 (minimo) -> 1 (feito) -> 0
-                      final next = _nextStatus(status);
-                      try {
-                        await controller.setCheckinForDate(habit.id, key, next);
-                        // refresh leve (debounce) para puxar backend sem travar UI
-                        controller.scheduleSilentRefresh();
-                      } catch (_) {
-                        if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Falha ao salvar.')),
-                          );
-                        }
-                      }
-                    },
-                    child: Container(
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                          color: Theme.of(context).dividerColor,
+                    return Stack(
+                      children: [
+                        Positioned(
+                          left: 4,
+                          top: 3,
+                          child: Text(
+                            '${day.day}',
+                            maxLines: 1,
+                            overflow: TextOverflow.clip,
+                            style: Theme.of(context)
+                                .textTheme
+                                .labelLarge
+                                ?.copyWith(fontSize: dayFont),
+                          ),
                         ),
-                      ),
-                      padding: EdgeInsets.zero,
-                      child: LayoutBuilder(
-                        builder: (context, constraints) {
-                          // Tiles podem ficar ~33x33 no crossAxisCount: 7
-                          // Stack evita RenderFlex overflow (Column).
-                          final h = constraints.maxHeight;
-                          final isTiny = h <= 36;
-
-                          final dayFont = isTiny ? 11.0 : (h < 48 ? 12.0 : 14.0);
-                          final weekFont = isTiny ? 9.0 : 10.0;
-                          final iconSize = isTiny ? 14.0 : 16.0;
-
-                          return Stack(
-                            children: [
-                              Positioned(
-                                left: 4,
-                                top: 3,
-                                child: Text(
-                                  '${day.day}',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.clip,
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .labelLarge
-                                      ?.copyWith(fontSize: dayFont),
-                                ),
-                              ),
-                              Positioned(
-                                right: 4,
-                                top: 5,
-                                child: Text(
-                                  _shortWeekday(day),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.clip,
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .labelSmall
-                                      ?.copyWith(fontSize: weekFont),
-                                ),
-                              ),
-                              Positioned(
-                                left: 0,
-                                right: 0,
-                                bottom: 3,
-                                child: Center(
-                                  child: _statusDot(
-                                    context,
-                                    status,
-                                    size: iconSize,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          );
-                        },
-                      ),
-                    ),
-                  );
-                },
+                        Positioned(
+                          right: 4,
+                          top: 5,
+                          child: Text(
+                            _shortWeekday(day),
+                            maxLines: 1,
+                            overflow: TextOverflow.clip,
+                            style: Theme.of(context)
+                                .textTheme
+                                .labelSmall
+                                ?.copyWith(fontSize: weekFont),
+                          ),
+                        ),
+                        Positioned(
+                          left: 0,
+                          right: 0,
+                          bottom: 3,
+                          child: Center(
+                            child: _statusDot(
+                              context,
+                              status,
+                              size: iconSize,
+                            ),
+                          ),
+                        ),
+                      ],
+                    );
+                  },
+                ),
               ),
-            ],
-          );
-        },
-      ),
+            );
+          },
+        ),
+      ],
     );
   }
 }

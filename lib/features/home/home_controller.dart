@@ -95,7 +95,6 @@ class HomeController extends StateNotifier<AsyncValue<HomeState>> {
       ));
       return;
     }
-    load();
   }
 
   bool get isRefreshing => _loading;

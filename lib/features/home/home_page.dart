@@ -14,6 +14,13 @@ class HomePage extends ConsumerWidget {
     final state = ref.watch(homeControllerProvider);
     final controller = ref.read(homeControllerProvider.notifier);
 
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final v = ref.read(homeControllerProvider);
+      if (v is AsyncLoading || v.value == null) {
+        controller.load();
+      }
+    });
+
     return Scaffold(
       appBar: AppBar(
         title: Column(
