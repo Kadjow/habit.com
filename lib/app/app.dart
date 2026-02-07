@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../features/auth/auth_gate.dart';
+import '../ui/theme/app_theme.dart';
 
 class App extends StatelessWidget {
   const App({super.key});
@@ -9,7 +10,7 @@ class App extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'habit_ai',
-      theme: ThemeData(useMaterial3: true),
+      theme: AppTheme.light(),
       home: const AuthGate(),
     );
   }
