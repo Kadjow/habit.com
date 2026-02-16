@@ -62,13 +62,13 @@ class HomeState {
 }
 
 final homeControllerProvider =
-    StateNotifierProvider.autoDispose<HomeController, AsyncValue<HomeState>>(
-  (ref) {
-    // Recria quando user muda (login/logout) e reseta estado
-    final uid = ref.watch(userIdProvider);
-    return HomeController(ref.watch(habitRepositoryProvider), uid);
-  },
-);
+    StateNotifierProvider.autoDispose<HomeController, AsyncValue<HomeState>>((
+      ref,
+    ) {
+      // Recria quando user muda (login/logout) e reseta estado
+      final uid = ref.watch(userIdProvider);
+      return HomeController(ref.watch(habitRepositoryProvider), uid);
+    });
 
 class HomeController extends StateNotifier<AsyncValue<HomeState>> {
   final HabitRepository _repository;
@@ -85,23 +85,27 @@ class HomeController extends StateNotifier<AsyncValue<HomeState>> {
   int debugSilentRefreshRuns = 0;
 
   HomeController(this._repository, this._uid)
-      : super(const AsyncValue.loading()) {
+    : super(const AsyncValue.loading()) {
     if (_uid == null) {
-      state = const AsyncValue.data(HomeState(
-        habits: [],
-        todayStatusByHabitId: {},
-        rhythm14DaysByHabitId: {},
-        checkinsByHabitId: {},
-      ));
+      state = const AsyncValue.data(
+        HomeState(
+          habits: [],
+          todayStatusByHabitId: {},
+          rhythm14DaysByHabitId: {},
+          checkinsByHabitId: {},
+        ),
+      );
       return;
     }
   }
 
   bool get isRefreshing => _loading;
 
-  // Evita load() pesado em sequência (ex: vários taps no grid).
+  // Evita load() pesado em sequÃªncia (ex: vÃ¡rios taps no grid).
   // Faz um refresh silencioso com debounce.
-  void scheduleSilentRefresh({Duration delay = const Duration(milliseconds: 600)}) {
+  void scheduleSilentRefresh({
+    Duration delay = const Duration(milliseconds: 600),
+  }) {
     if (_syncPending) return;
     _syncPending = true;
     Future.delayed(delay, () async {
@@ -111,16 +115,19 @@ class HomeController extends StateNotifier<AsyncValue<HomeState>> {
         debugSilentRefreshRuns++;
         await load(); // refresh geral (silencioso)
       } catch (_) {
-        // Sem crash: refresh é "best effort"
+        // Sem crash: refresh Ã© "best effort"
       }
     });
   }
 
   Future<void> load() async {
-    // Validação automática: se existir recursão (load chamando load),
-    // isso quebra em debug/test e fica óbvio.
-    assert(!_inLoad, 'HomeController.load() called recursively. '
-        'Never call load() from inside load(). Use scheduleSilentRefresh().');
+    // ValidaÃ§Ã£o automÃ¡tica: se existir recursÃ£o (load chamando load),
+    // isso quebra em debug/test e fica Ã³bvio.
+    assert(
+      !_inLoad,
+      'HomeController.load() called recursively. '
+      'Never call load() from inside load(). Use scheduleSilentRefresh().',
+    );
     if (_loading) return;
     _inLoad = true;
     debugLoadCalls++;
@@ -133,24 +140,28 @@ class HomeController extends StateNotifier<AsyncValue<HomeState>> {
     }
     try {
       if (_uid == null) {
-        state = const AsyncValue.data(HomeState(
-          habits: [],
-          todayStatusByHabitId: {},
-          rhythm14DaysByHabitId: {},
-          checkinsByHabitId: {},
-        ));
+        state = const AsyncValue.data(
+          HomeState(
+            habits: [],
+            todayStatusByHabitId: {},
+            rhythm14DaysByHabitId: {},
+            checkinsByHabitId: {},
+          ),
+        );
         return;
       }
 
       final habits = await _repository.listHabits();
       if (!mounted) return;
       if (habits.isEmpty) {
-        state = const AsyncValue.data(HomeState(
-          habits: [],
-          todayStatusByHabitId: {},
-          rhythm14DaysByHabitId: {},
-          checkinsByHabitId: {},
-        ));
+        state = const AsyncValue.data(
+          HomeState(
+            habits: [],
+            todayStatusByHabitId: {},
+            rhythm14DaysByHabitId: {},
+            checkinsByHabitId: {},
+          ),
+        );
         return;
       }
 
@@ -158,8 +169,11 @@ class HomeController extends StateNotifier<AsyncValue<HomeState>> {
       final todayKey = toDateKey(today);
 
       final habitIds = habits.map((h) => h.id).toList();
-      final allCheckins =
-          await _repository.lastCheckinsForHabits(habitIds, 14, todayKey);
+      final allCheckins = await _repository.lastCheckinsForHabits(
+        habitIds,
+        14,
+        todayKey,
+      );
       if (!mounted) return;
 
       // Payload serializavel pro isolate
@@ -168,11 +182,13 @@ class HomeController extends StateNotifier<AsyncValue<HomeState>> {
         'todayKey': todayKey,
         'todayMillis': today.millisecondsSinceEpoch,
         'checkins': allCheckins
-            .map((c) => {
-                  'habitId': c.habitId,
-                  'dateKey': c.dateKey,
-                  'status': c.status,
-                })
+            .map(
+              (c) => {
+                'habitId': c.habitId,
+                'dateKey': c.dateKey,
+                'status': c.status,
+              },
+            )
             .toList(),
       };
 
@@ -182,24 +198,23 @@ class HomeController extends StateNotifier<AsyncValue<HomeState>> {
           : await compute(_buildHomeMetrics, payload);
       if (!mounted) return;
 
-      final todayStatusByHabitId =
-          (out['todayStatusByHabitId'] as Map).cast<String, int>();
-      final rhythm14DaysByHabitId =
-          (out['rhythm14DaysByHabitId'] as Map).cast<String, double>();
-      final checkinsByHabitId =
-          (out['checkinsByHabitId'] as Map).map<String, Map<String, int>>(
-        (hid, v) => MapEntry(
-          hid as String,
-          (v as Map).cast<String, int>(),
+      final todayStatusByHabitId = (out['todayStatusByHabitId'] as Map)
+          .cast<String, int>();
+      final rhythm14DaysByHabitId = (out['rhythm14DaysByHabitId'] as Map)
+          .cast<String, double>();
+      final checkinsByHabitId = (out['checkinsByHabitId'] as Map)
+          .map<String, Map<String, int>>(
+            (hid, v) => MapEntry(hid as String, (v as Map).cast<String, int>()),
+          );
+
+      state = AsyncValue.data(
+        HomeState(
+          habits: habits,
+          todayStatusByHabitId: todayStatusByHabitId,
+          rhythm14DaysByHabitId: rhythm14DaysByHabitId,
+          checkinsByHabitId: checkinsByHabitId,
         ),
       );
-
-      state = AsyncValue.data(HomeState(
-        habits: habits,
-        todayStatusByHabitId: todayStatusByHabitId,
-        rhythm14DaysByHabitId: rhythm14DaysByHabitId,
-        checkinsByHabitId: checkinsByHabitId,
-      ));
     } catch (e, st) {
       if (!mounted) return;
       // Se ja havia dados, preserva e evita "tela de erro total".
@@ -226,14 +241,20 @@ class HomeController extends StateNotifier<AsyncValue<HomeState>> {
     await setCheckinForDate(habitId, todayKey, nextStatus);
   }
 
-  Future<void> setCheckinForDate(String habitId, String dateKey, int nextStatus) async {
+  Future<void> setCheckinForDate(
+    String habitId,
+    String dateKey,
+    int nextStatus,
+  ) async {
     final currentState = state.value;
     if (currentState == null || _uid == null) return;
 
-    final updatedByHabit =
-        Map<String, Map<String, int>>.from(currentState.checkinsByHabitId);
-    final byDate =
-        Map<String, int>.from(updatedByHabit[habitId] ?? <String, int>{});
+    final updatedByHabit = Map<String, Map<String, int>>.from(
+      currentState.checkinsByHabitId,
+    );
+    final byDate = Map<String, int>.from(
+      updatedByHabit[habitId] ?? <String, int>{},
+    );
 
     // optimistic
     byDate[dateKey] = nextStatus;
@@ -243,8 +264,9 @@ class HomeController extends StateNotifier<AsyncValue<HomeState>> {
     final todayKey = toDateKey(today);
 
     // today status
-    final updatedToday = Map<String, int>.from(currentState.todayStatusByHabitId)
-      ..[habitId] = byDate[todayKey] ?? 0;
+    final updatedToday = Map<String, int>.from(
+      currentState.todayStatusByHabitId,
+    )..[habitId] = byDate[todayKey] ?? 0;
 
     // rhythm 14d
     var doneCount = 0;
@@ -253,22 +275,24 @@ class HomeController extends StateNotifier<AsyncValue<HomeState>> {
       final s = byDate[dk] ?? 0;
       if (s == 1 || s == 2) doneCount++;
     }
-    final updatedRhythm =
-        Map<String, double>.from(currentState.rhythm14DaysByHabitId)
-          ..[habitId] = doneCount / 14.0;
+    final updatedRhythm = Map<String, double>.from(
+      currentState.rhythm14DaysByHabitId,
+    )..[habitId] = doneCount / 14.0;
 
-    state = AsyncValue.data(HomeState(
-      habits: currentState.habits,
-      todayStatusByHabitId: updatedToday,
-      rhythm14DaysByHabitId: updatedRhythm,
-      checkinsByHabitId: updatedByHabit,
-    ));
+    state = AsyncValue.data(
+      HomeState(
+        habits: currentState.habits,
+        todayStatusByHabitId: updatedToday,
+        rhythm14DaysByHabitId: updatedRhythm,
+        checkinsByHabitId: updatedByHabit,
+      ),
+    );
 
     try {
       await _repository.upsertCheckinForDateKey(habitId, dateKey, nextStatus);
       if (!mounted) return;
-      // NÃO faz load() aqui — evita travar a UI.
-      // Se quiser consistência 100% do backend, use scheduleSilentRefresh()
+      // NÃƒO faz load() aqui â€” evita travar a UI.
+      // Se quiser consistÃªncia 100% do backend, use scheduleSilentRefresh()
     } catch (_) {
       if (!mounted) return;
       state = AsyncValue.data(currentState); // rollback
@@ -280,6 +304,11 @@ class HomeController extends StateNotifier<AsyncValue<HomeState>> {
     if (_uid == null) return;
     await _repository.createHabit(title, difficulty);
     if (!mounted) return;
+    await load();
+  }
+
+  Future<void> deleteHabit(String habitId) async {
+    await _repository.deleteHabit(habitId);
     await load();
   }
 }

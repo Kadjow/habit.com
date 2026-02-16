@@ -25,13 +25,15 @@ class HabitRepositorySupabase implements HabitRepository {
         .order('created_at', ascending: false);
 
     return (rows as List)
-        .map((r) => Habit(
-              id: r['id'] as String,
-              title: r['title'] as String,
-              isActive: (r['is_active'] as bool?) ?? true,
-              difficulty: (r['difficulty'] as int?) ?? 1,
-              createdAt: DateTime.parse(r['created_at'] as String),
-            ))
+        .map(
+          (r) => Habit(
+            id: r['id'] as String,
+            title: r['title'] as String,
+            isActive: (r['is_active'] as bool?) ?? true,
+            difficulty: (r['difficulty'] as int?) ?? 1,
+            createdAt: DateTime.parse(r['created_at'] as String),
+          ),
+        )
         .toList();
   }
 
@@ -53,8 +55,9 @@ class HabitRepositorySupabase implements HabitRepository {
     String todayDateKey,
   ) async {
     final uid = _uidOrThrow();
-    final cutoffDate =
-        fromDateKey(todayDateKey).subtract(Duration(days: days - 1));
+    final cutoffDate = fromDateKey(
+      todayDateKey,
+    ).subtract(Duration(days: days - 1));
     final cutoffDateValue = cutoffDate.toIso8601String().substring(0, 10);
 
     final rows = await _client
@@ -67,14 +70,16 @@ class HabitRepositorySupabase implements HabitRepository {
         .limit(days + 5);
 
     return (rows as List)
-        .map((r) => CheckIn(
-              id: r['id'] as String,
-              habitId: r['habit_id'] as String,
-              date: DateTime.parse(r['date'] as String),
-              dateKey: r['date_key'] as String,
-              status: r['status'] as int,
-              createdAt: DateTime.parse(r['created_at'] as String),
-            ))
+        .map(
+          (r) => CheckIn(
+            id: r['id'] as String,
+            habitId: r['habit_id'] as String,
+            date: DateTime.parse(r['date'] as String),
+            dateKey: r['date_key'] as String,
+            status: r['status'] as int,
+            createdAt: DateTime.parse(r['created_at'] as String),
+          ),
+        )
         .toList();
   }
 
@@ -86,8 +91,9 @@ class HabitRepositorySupabase implements HabitRepository {
   ) async {
     if (habitIds.isEmpty) return [];
     final uid = _uidOrThrow();
-    final cutoffDate =
-        fromDateKey(todayDateKey).subtract(Duration(days: days - 1));
+    final cutoffDate = fromDateKey(
+      todayDateKey,
+    ).subtract(Duration(days: days - 1));
     final cutoffKey = toDateKey(cutoffDate);
 
     final rows = await _client
@@ -100,14 +106,16 @@ class HabitRepositorySupabase implements HabitRepository {
         .limit(habitIds.length * (days + 5));
 
     return (rows as List)
-        .map((r) => CheckIn(
-              id: r['id'] as String,
-              habitId: r['habit_id'] as String,
-              date: DateTime.parse(r['date'] as String),
-              dateKey: r['date_key'] as String,
-              status: r['status'] as int,
-              createdAt: DateTime.parse(r['created_at'] as String),
-            ))
+        .map(
+          (r) => CheckIn(
+            id: r['id'] as String,
+            habitId: r['habit_id'] as String,
+            date: DateTime.parse(r['date'] as String),
+            dateKey: r['date_key'] as String,
+            status: r['status'] as int,
+            createdAt: DateTime.parse(r['created_at'] as String),
+          ),
+        )
         .toList();
   }
 
@@ -151,16 +159,13 @@ class HabitRepositorySupabase implements HabitRepository {
       return;
     }
 
-    await _client.from('checkins').upsert(
-      {
-        'user_id': uid,
-        'habit_id': habitId,
-        'date_key': dateKey,
-        'date': dateKey,
-        'status': status,
-      },
-      onConflict: 'user_id,habit_id,date_key',
-    );
+    await _client.from('checkins').upsert({
+      'user_id': uid,
+      'habit_id': habitId,
+      'date_key': dateKey,
+      'date': dateKey,
+      'status': status,
+    }, onConflict: 'user_id,habit_id,date_key');
   }
 
   @override
@@ -171,15 +176,17 @@ class HabitRepositorySupabase implements HabitRepository {
   ) async {
     final uid = _uidOrThrow();
 
-    await _client.from('checkins').upsert(
-      {
-        'user_id': uid,
-        'habit_id': habitId,
-        'date_key': dateKey,
-        'date': fromDateKey(dateKey).toIso8601String(),
-        'status': status,
-      },
-      onConflict: 'user_id,habit_id,date_key',
-    );
+    await _client.from('checkins').upsert({
+      'user_id': uid,
+      'habit_id': habitId,
+      'date_key': dateKey,
+      'date': fromDateKey(dateKey).toIso8601String(),
+      'status': status,
+    }, onConflict: 'user_id,habit_id,date_key');
+  }
+
+  @override
+  Future<void> deleteHabit(String habitId) async {
+    await _client.from('habits').delete().eq('id', habitId);
   }
 }

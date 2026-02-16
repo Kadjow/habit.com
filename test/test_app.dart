@@ -32,6 +32,12 @@ class FakeHabitRepository implements HabitRepository {
   }
 
   @override
+  Future<void> deleteHabit(String habitId) async {
+    habits.removeWhere((h) => h.id == habitId);
+    _checkinsByHabitId.remove(habitId);
+  }
+
+  @override
   Future<CheckIn?> getCheckinForDate(String habitId, String dateKey) async {
     final map = _checkinsByHabitId[habitId];
     final v = map == null ? null : map[dateKey];
