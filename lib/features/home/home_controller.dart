@@ -76,6 +76,7 @@ class HomeController extends StateNotifier<AsyncValue<HomeState>> {
   bool _loading = false;
   bool _syncPending = false;
   bool _inLoad = false;
+  final Set<String> _checkedPairs7d = <String>{};
 
   // Debug counters (useful for tests)
   @visibleForTesting
@@ -101,7 +102,7 @@ class HomeController extends StateNotifier<AsyncValue<HomeState>> {
 
   bool get isRefreshing => _loading;
 
-  // Evita load() pesado em sequÃªncia (ex: vÃ¡rios taps no grid).
+  // Evita load() pesado em sequencia (ex: varios taps no grid).
   // Faz um refresh silencioso com debounce.
   void scheduleSilentRefresh({
     Duration delay = const Duration(milliseconds: 600),
@@ -115,14 +116,14 @@ class HomeController extends StateNotifier<AsyncValue<HomeState>> {
         debugSilentRefreshRuns++;
         await load(); // refresh geral (silencioso)
       } catch (_) {
-        // Sem crash: refresh Ã© "best effort"
+        // Sem crash: refresh e "best effort"
       }
     });
   }
 
   Future<void> load() async {
-    // ValidaÃ§Ã£o automÃ¡tica: se existir recursÃ£o (load chamando load),
-    // isso quebra em debug/test e fica Ã³bvio.
+    // Validacao automatica: se existir recursao (load chamando load),
+    // isso quebra em debug/test e fica obvio.
     assert(
       !_inLoad,
       'HomeController.load() called recursively. '
@@ -132,14 +133,10 @@ class HomeController extends StateNotifier<AsyncValue<HomeState>> {
     _inLoad = true;
     debugLoadCalls++;
     _loading = true;
-    // UX: evita "piscar" a tela toda vez que carrega.
-    // Se ja ha dados, mantemos e carregamos em background.
-    final previous = state.value;
-    if (previous == null) {
-      state = const AsyncValue.loading();
-    }
+    state = const AsyncValue.loading();
     try {
       if (_uid == null) {
+        _checkedPairs7d.clear();
         state = const AsyncValue.data(
           HomeState(
             habits: [],
@@ -151,9 +148,12 @@ class HomeController extends StateNotifier<AsyncValue<HomeState>> {
         return;
       }
 
-      final habits = await _repository.listHabits();
+      final habits = await _repository.listHabits().timeout(
+        const Duration(seconds: 12),
+      );
       if (!mounted) return;
       if (habits.isEmpty) {
+        _checkedPairs7d.clear();
         state = const AsyncValue.data(
           HomeState(
             habits: [],
@@ -169,11 +169,9 @@ class HomeController extends StateNotifier<AsyncValue<HomeState>> {
       final todayKey = toDateKey(today);
 
       final habitIds = habits.map((h) => h.id).toList();
-      final allCheckins = await _repository.lastCheckinsForHabits(
-        habitIds,
-        14,
-        todayKey,
-      );
+      final allCheckins = await _repository
+          .lastCheckinsForHabits(habitIds, 14, todayKey)
+          .timeout(const Duration(seconds: 12));
       if (!mounted) return;
 
       // Payload serializavel pro isolate
@@ -206,6 +204,22 @@ class HomeController extends StateNotifier<AsyncValue<HomeState>> {
           .map<String, Map<String, int>>(
             (hid, v) => MapEntry(hid as String, (v as Map).cast<String, int>()),
           );
+      final last7 = last7DateKeys().toSet();
+      _checkedPairs7d
+        ..clear()
+        ..addAll(
+          checkinsByHabitId.entries.expand((entry) {
+            final habitId = entry.key;
+            final byDate = entry.value;
+            return byDate.entries
+                .where(
+                  (dateEntry) =>
+                      last7.contains(dateEntry.key) &&
+                      _isDoneStatus(dateEntry.value),
+                )
+                .map((dateEntry) => '$habitId|${dateEntry.key}');
+          }),
+        );
 
       state = AsyncValue.data(
         HomeState(
@@ -217,13 +231,7 @@ class HomeController extends StateNotifier<AsyncValue<HomeState>> {
       );
     } catch (e, st) {
       if (!mounted) return;
-      // Se ja havia dados, preserva e evita "tela de erro total".
-      if (previous != null) {
-        state = AsyncValue.data(previous);
-      } else {
-        state = AsyncValue.error(e, st);
-      }
-      rethrow;
+      state = AsyncValue.error(e, st);
     } finally {
       _loading = false;
       _inLoad = false;
@@ -241,6 +249,98 @@ class HomeController extends StateNotifier<AsyncValue<HomeState>> {
     await setCheckinForDate(habitId, todayKey, nextStatus);
   }
 
+  bool isDoneToday(String habitId) {
+    final currentState = state.value;
+    if (currentState == null) return false;
+    final status = currentState.todayStatusByHabitId[habitId] ?? 0;
+    return status == 1 || status == 2;
+  }
+
+  Future<void> toggleToday(String habitId) async {
+    final currentState = state.value;
+    if (currentState == null || _uid == null) return;
+
+    final todayKey = toDateKey(todayLocal());
+    final current = currentState.todayStatusByHabitId[habitId] ?? 0;
+    final done = current == 1 || current == 2;
+    final nextStatus = done ? 0 : 1;
+    await setCheckinForDate(habitId, todayKey, nextStatus);
+  }
+
+  Future<void> refreshTodayStatus() async {
+    final currentState = state.value;
+    if (currentState == null || _uid == null) return;
+
+    final dateKey = toDateKey(todayLocal());
+    final checked = await _repository.listCheckedHabitIdsForDateKey(
+      dateKey: dateKey,
+    );
+    if (!mounted) return;
+
+    final updatedToday = <String, int>{
+      for (final habit in currentState.habits)
+        habit.id: checked.contains(habit.id) ? 1 : 0,
+    };
+    _checkedPairs7d.removeWhere((pair) => pair.endsWith('|$dateKey'));
+    for (final habitId in checked) {
+      _checkedPairs7d.add('$habitId|$dateKey');
+    }
+
+    state = AsyncValue.data(
+      HomeState(
+        habits: currentState.habits,
+        todayStatusByHabitId: updatedToday,
+        rhythm14DaysByHabitId: currentState.rhythm14DaysByHabitId,
+        checkinsByHabitId: currentState.checkinsByHabitId,
+      ),
+    );
+  }
+
+  List<String> last7DateKeys() {
+    final now = todayLocal();
+    final keys = <String>[];
+    for (var i = 6; i >= 0; i--) {
+      keys.add(toDateKey(now.subtract(Duration(days: i))));
+    }
+    return keys;
+  }
+
+  bool isChecked7d(String habitId, String dateKey) {
+    return _checkedPairs7d.contains('$habitId|$dateKey');
+  }
+
+  int doneCount7d(String habitId) {
+    var count = 0;
+    for (final dateKey in last7DateKeys()) {
+      if (isChecked7d(habitId, dateKey)) count++;
+    }
+    return count;
+  }
+
+  Future<void> refreshWeekStatus() async {
+    final currentState = state.value;
+    if (currentState == null || _uid == null) return;
+
+    final keys = last7DateKeys();
+    final pairs = await _repository.listCheckedPairsForDateKeys(dateKeys: keys);
+    if (!mounted) return;
+
+    _checkedPairs7d
+      ..clear()
+      ..addAll(pairs);
+
+    state = AsyncValue.data(
+      HomeState(
+        habits: currentState.habits,
+        todayStatusByHabitId: currentState.todayStatusByHabitId,
+        rhythm14DaysByHabitId: currentState.rhythm14DaysByHabitId,
+        checkinsByHabitId: currentState.checkinsByHabitId,
+      ),
+    );
+  }
+
+  bool _isDoneStatus(int status) => status == 1 || status == 2;
+
   Future<void> setCheckinForDate(
     String habitId,
     String dateKey,
@@ -248,6 +348,10 @@ class HomeController extends StateNotifier<AsyncValue<HomeState>> {
   ) async {
     final currentState = state.value;
     if (currentState == null || _uid == null) return;
+    final pairKey = '$habitId|$dateKey';
+    final last7 = last7DateKeys().toSet();
+    final touchesWeek = last7.contains(dateKey);
+    final hadPair = _checkedPairs7d.contains(pairKey);
 
     final updatedByHabit = Map<String, Map<String, int>>.from(
       currentState.checkinsByHabitId,
@@ -259,6 +363,13 @@ class HomeController extends StateNotifier<AsyncValue<HomeState>> {
     // optimistic
     byDate[dateKey] = nextStatus;
     updatedByHabit[habitId] = byDate;
+    if (touchesWeek) {
+      if (_isDoneStatus(nextStatus)) {
+        _checkedPairs7d.add(pairKey);
+      } else {
+        _checkedPairs7d.remove(pairKey);
+      }
+    }
 
     final today = todayLocal();
     final todayKey = toDateKey(today);
@@ -291,10 +402,17 @@ class HomeController extends StateNotifier<AsyncValue<HomeState>> {
     try {
       await _repository.upsertCheckinForDateKey(habitId, dateKey, nextStatus);
       if (!mounted) return;
-      // NÃƒO faz load() aqui â€” evita travar a UI.
-      // Se quiser consistÃªncia 100% do backend, use scheduleSilentRefresh()
+      // Nao faz load() aqui - evita travar a UI.
+      // Se quiser consistencia 100% do backend, use scheduleSilentRefresh()
     } catch (_) {
       if (!mounted) return;
+      if (touchesWeek) {
+        if (hadPair) {
+          _checkedPairs7d.add(pairKey);
+        } else {
+          _checkedPairs7d.remove(pairKey);
+        }
+      }
       state = AsyncValue.data(currentState); // rollback
       rethrow;
     }

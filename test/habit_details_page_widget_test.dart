@@ -10,9 +10,6 @@ void main() {
   testWidgets(
     'HabitDetailsPage renders without layout exceptions and accepts taps',
     (tester) async {
-      // Seu Habit exige campos obrigatorios (pelo erro: createdAt, difficulty, isActive).
-      // Ajuste aqui para o construtor REAL do seu Habit.
-      // Pelo log, sabemos pelo menos esses 3 existem.
       final habit = Habit(
         id: 'h1',
         title: 'Atividade fisica!',
@@ -31,21 +28,27 @@ void main() {
       await tester.pumpWidget(
         buildSmokeTestApp(
           homeState: homeState,
-          home: HabitDetailsPage(habit: habit),
+          home: HabitDetailsPage(
+            habitId: habit.id,
+            title: habit.title,
+            difficulty: habit.difficulty,
+          ),
         ),
       );
 
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
 
-      // Dispara alguns taps
-      final tiles = find.byType(InkWell);
-      expect(tiles, findsWidgets);
+      expect(find.text('Atividade fisica!'), findsWidgets);
+      expect(find.text('Dificuldade: 1'), findsOneWidget);
 
-      for (var i = 0; i < 6; i++) {
-        await tester.tap(tiles.at(i));
-        await tester.pump(const Duration(milliseconds: 10));
-      }
+      // Botao unico de toggle (label muda conforme o estado). Toca 2x.
+      final toggle = find.byType(FilledButton);
+      expect(toggle, findsOneWidget);
+      await tester.tap(toggle);
+      await tester.pumpAndSettle();
+      await tester.tap(toggle);
+      await tester.pumpAndSettle();
 
       expect(tester.takeException(), isNull);
     },

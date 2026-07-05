@@ -1,442 +1,43 @@
-import 'dart:ui';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import 'habit_details_page.dart';
 import 'home_controller.dart';
 
-class HomeHabitsV2 extends ConsumerStatefulWidget {
-  const HomeHabitsV2({super.key});
+class HomeHabitsV2 extends ConsumerWidget {
+  final VoidCallback? onCreateHabit;
 
-  static const _orderKey = 'home_habits_order_v2';
-  static const _pinsKey = 'home_habits_pins_v2';
-
-  @override
-  ConsumerState<HomeHabitsV2> createState() => _HomeHabitsV2State();
-}
-
-class _HomeHabitsV2State extends ConsumerState<HomeHabitsV2> {
-  bool _prefsReady = false;
-  List<String> _order = const [];
-  Set<String> _pinned = const <String>{};
-  List<dynamic> _visibleHabits = const [];
+  const HomeHabitsV2({super.key, this.onCreateHabit});
 
   @override
-  void initState() {
-    super.initState();
-    _loadPrefs();
-  }
+  Widget build(BuildContext context, WidgetRef ref) {
+    final asyncHome = ref.watch(homeControllerProvider);
 
-  Future<void> _loadPrefs() async {
-    final prefs = await SharedPreferences.getInstance();
-    final order =
-        prefs.getStringList(HomeHabitsV2._orderKey) ?? const <String>[];
-    final pins =
-        (prefs.getStringList(HomeHabitsV2._pinsKey) ?? const <String>[])
-            .toSet();
-    if (!mounted) return;
-    setState(() {
-      _order = order;
-      _pinned = pins;
-      _prefsReady = true;
-    });
-  }
-
-  Future<void> _savePrefs() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setStringList(HomeHabitsV2._orderKey, _order);
-    await prefs.setStringList(HomeHabitsV2._pinsKey, _pinned.toList());
-  }
-
-  String _habitId(dynamic habit) {
-    final id = habit.id;
-    if (id is String) return id;
-    return '$id';
-  }
-
-  String _habitTitle(dynamic habit) {
-    try {
-      final title = habit.title;
-      if (title is String && title.isNotEmpty) return title;
-    } catch (_) {}
-    try {
-      final name = habit.name;
-      if (name is String && name.isNotEmpty) return name;
-    } catch (_) {}
-    return 'Habito';
-  }
-
-  List<dynamic> _applyOrderAndPins(List<dynamic> habits) {
-    final byId = <String, dynamic>{for (final h in habits) _habitId(h): h};
-
-    final pinnedOrdered = <dynamic>[];
-    for (final id in _order) {
-      if (_pinned.contains(id) && byId.containsKey(id)) {
-        pinnedOrdered.add(byId[id]);
-      }
-    }
-
-    for (final id in _pinned) {
-      if (!_order.contains(id) && byId.containsKey(id)) {
-        pinnedOrdered.add(byId[id]);
-      }
-    }
-
-    final ordered = <dynamic>[];
-    for (final id in _order) {
-      if (!_pinned.contains(id) && byId.containsKey(id)) {
-        ordered.add(byId[id]);
-      }
-    }
-
-    final used = <String>{..._pinned, ..._order};
-    final rest = habits.where((h) => !used.contains(_habitId(h))).toList();
-
-    return <dynamic>[...pinnedOrdered, ...ordered, ...rest];
-  }
-
-  Future<bool> _confirmDelete(BuildContext context, dynamic habit) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Excluir habito?'),
-        content: Text('Deseja excluir "${_habitTitle(habit)}"?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Cancelar'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Excluir'),
-          ),
-        ],
-      ),
-    );
-    return ok ?? false;
-  }
-
-  void _openDetails(BuildContext context, dynamic habit) {
-    Navigator.of(
-      context,
-    ).push(MaterialPageRoute(builder: (_) => HabitDetailsPage(habit: habit)));
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final homeAsync = ref.watch(homeControllerProvider);
-    final controller = ref.read(homeControllerProvider.notifier);
-
-    return SafeArea(
-      child: homeAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, st) => Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Text('Erro ao carregar habitos.'),
-              const SizedBox(height: 8),
-              Text(e.toString(), maxLines: 4, overflow: TextOverflow.ellipsis),
-              const SizedBox(height: 16),
-              FilledButton(
-                onPressed: controller.load,
-                child: const Text('Tentar novamente'),
-              ),
-            ],
-          ),
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 180),
+      child: asyncHome.when(
+        loading: () => const _HabitsLoading(),
+        error: (e, _) => _HabitsError(
+          message: e.toString(),
+          onRetry: () async {
+            final notifier = ref.read(homeControllerProvider.notifier);
+            await notifier.load();
+            await notifier.refreshTodayStatus();
+            await notifier.refreshWeekStatus();
+          },
         ),
-        data: (state) {
-          final baseHabits = state.habits.cast<dynamic>();
-          final ordered = _prefsReady
-              ? _applyOrderAndPins(baseHabits)
-              : baseHabits;
-          _visibleHabits = List<dynamic>.from(ordered);
-
-          if (_visibleHabits.isEmpty) {
-            return RefreshIndicator(
-              onRefresh: controller.load,
-              child: ListView(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 24,
-                ),
-                children: const [
-                  SizedBox(height: 48),
-                  Icon(Icons.auto_awesome_outlined, size: 40),
-                  SizedBox(height: 12),
-                  Text(
-                    'Nenhum habito ainda',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
-                  ),
-                  SizedBox(height: 6),
-                  Text(
-                    'Crie seu primeiro habito no botao +.',
-                    textAlign: TextAlign.center,
-                  ),
-                ],
-              ),
-            );
-          }
-
+        data: (home) {
+          final list = home.habits;
           return RefreshIndicator(
-            onRefresh: controller.load,
-            child: Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-                  child: Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(18),
-                      boxShadow: [
-                        BoxShadow(
-                          blurRadius: 18,
-                          spreadRadius: -6,
-                          offset: Offset(0, 10),
-                          color: Colors.black12,
-                        ),
-                      ],
-                      gradient: LinearGradient(
-                        colors: [
-                          Theme.of(context).colorScheme.primary,
-                          Theme.of(context).colorScheme.tertiary,
-                        ],
-                      ),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Seus habitos',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w700,
-                            color: Colors.white,
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          'Arraste para priorizar. Direita fixa, esquerda exclui.',
-                          style: TextStyle(
-                            color: Colors.white.withOpacity(0.95),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                Expanded(
-                  child: ReorderableListView.builder(
-                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-                    buildDefaultDragHandles: false,
-                    proxyDecorator: (child, index, animation) {
-                      return AnimatedBuilder(
-                        animation: animation,
-                        builder: (context, _) {
-                          final t = Curves.easeInOut.transform(animation.value);
-                          final elev = lerpDouble(0, 8, t) ?? 0;
-                          return Material(
-                            elevation: elev,
-                            borderRadius: BorderRadius.circular(18),
-                            child: child,
-                          );
-                        },
-                        child: child,
-                      );
-                    },
-                    itemCount: _visibleHabits.length,
-                    onReorder: (oldIndex, newIndex) async {
-                      setState(() {
-                        if (newIndex > oldIndex) newIndex -= 1;
-                        final item = _visibleHabits.removeAt(oldIndex);
-                        _visibleHabits.insert(newIndex, item);
-                        _order = _visibleHabits.map(_habitId).toList();
-                      });
-                      await _savePrefs();
-                    },
-                    itemBuilder: (context, index) {
-                      final habit = _visibleHabits[index];
-                      final id = _habitId(habit);
-                      final pinned = _pinned.contains(id);
-
-                      return Dismissible(
-                        key: ValueKey('habit_$id'),
-                        direction: DismissDirection.horizontal,
-                        background: _SwipeBackground(
-                          alignLeft: true,
-                          icon: pinned
-                              ? Icons.push_pin
-                              : Icons.push_pin_outlined,
-                          label: pinned ? 'Desafixar' : 'Fixar',
-                        ),
-                        secondaryBackground: const _SwipeBackground(
-                          alignLeft: false,
-                          icon: Icons.delete_outline,
-                          label: 'Excluir',
-                        ),
-                        confirmDismiss: (direction) async {
-                          if (direction == DismissDirection.startToEnd) {
-                            setState(() {
-                              if (_pinned.contains(id)) {
-                                _pinned.remove(id);
-                              } else {
-                                _pinned.add(id);
-                                if (!_order.contains(id)) {
-                                  _order = <String>[id, ..._order];
-                                }
-                              }
-                              _visibleHabits = _applyOrderAndPins(
-                                _visibleHabits,
-                              );
-                            });
-                            await _savePrefs();
-                            if (!context.mounted) return false;
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(
-                                  pinned
-                                      ? 'Habito desafixado'
-                                      : 'Habito fixado no topo',
-                                ),
-                              ),
-                            );
-                            return false;
-                          }
-
-                          final ok = await _confirmDelete(context, habit);
-                          if (!ok) return false;
-
-                          setState(() {
-                            _visibleHabits.removeAt(index);
-                            _order = _visibleHabits.map(_habitId).toList();
-                            _pinned.remove(id);
-                          });
-                          await _savePrefs();
-
-                          try {
-                            await (controller as dynamic).deleteHabit(id);
-                          } catch (_) {}
-
-                          controller.load();
-                          return true;
-                        },
-                        child: AnimatedSize(
-                          duration: const Duration(milliseconds: 180),
-                          curve: Curves.easeOut,
-                          child: Card(
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(18),
-                            ),
-                            child: InkWell(
-                              borderRadius: BorderRadius.circular(18),
-                              onTap: () => _openDetails(context, habit),
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 10,
-                                ),
-                                child: Row(
-                                  children: [
-                                    Container(
-                                      width: 10,
-                                      height: 44,
-                                      decoration: BoxDecoration(
-                                        borderRadius: BorderRadius.circular(99),
-                                        gradient: LinearGradient(
-                                          colors: [
-                                            Theme.of(
-                                              context,
-                                            ).colorScheme.primary,
-                                            Theme.of(
-                                              context,
-                                            ).colorScheme.secondary,
-                                          ],
-                                        ),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 12),
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          Row(
-                                            children: [
-                                              Expanded(
-                                                child: Text(
-                                                  _habitTitle(habit),
-                                                  maxLines: 1,
-                                                  overflow:
-                                                      TextOverflow.ellipsis,
-                                                  style: const TextStyle(
-                                                    fontSize: 16,
-                                                    fontWeight: FontWeight.w700,
-                                                  ),
-                                                ),
-                                              ),
-                                              AnimatedSwitcher(
-                                                duration: const Duration(
-                                                  milliseconds: 180,
-                                                ),
-                                                child: pinned
-                                                    ? const Icon(
-                                                        Icons.push_pin,
-                                                        key: ValueKey('pinned'),
-                                                        size: 18,
-                                                      )
-                                                    : const SizedBox(
-                                                        key: ValueKey(
-                                                          'unpinned',
-                                                        ),
-                                                        width: 18,
-                                                        height: 18,
-                                                      ),
-                                              ),
-                                            ],
-                                          ),
-                                          const SizedBox(height: 4),
-                                          Text(
-                                            pinned
-                                                ? 'Fixado no topo'
-                                                : 'Arraste para priorizar',
-                                            style: TextStyle(
-                                              color: Theme.of(context)
-                                                  .colorScheme
-                                                  .onSurface
-                                                  .withOpacity(0.7),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    ReorderableDragStartListener(
-                                      index: index,
-                                      child: Icon(
-                                        Icons.drag_handle_rounded,
-                                        color: Theme.of(context)
-                                            .colorScheme
-                                            .onSurface
-                                            .withOpacity(0.55),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-              ],
-            ),
+            onRefresh: () async {
+              final notifier = ref.read(homeControllerProvider.notifier);
+              await notifier.load();
+              await notifier.refreshTodayStatus();
+              await notifier.refreshWeekStatus();
+            },
+            child: list.isEmpty
+                ? _HabitsEmpty(onCreateHabit: onCreateHabit)
+                : _HabitsList(habits: list),
           );
         },
       ),
@@ -444,55 +45,480 @@ class _HomeHabitsV2State extends ConsumerState<HomeHabitsV2> {
   }
 }
 
-class _SwipeBackground extends StatelessWidget {
-  final bool alignLeft;
-  final IconData icon;
-  final String label;
+class _HabitsLoading extends StatelessWidget {
+  const _HabitsLoading();
 
-  const _SwipeBackground({
-    required this.alignLeft,
-    required this.icon,
-    required this.label,
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 120),
+      children: [
+        const _HeaderCard(title: 'Seus habitos', subtitle: 'Carregando...'),
+        const SizedBox(height: 14),
+        for (var i = 0; i < 6; i++) ...[
+          const _SkeletonCard(),
+          const SizedBox(height: 10),
+        ],
+      ],
+    );
+  }
+}
+
+class _HabitsError extends StatelessWidget {
+  final String message;
+  final Future<void> Function() onRetry;
+
+  const _HabitsError({required this.message, required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 120),
+      children: [
+        const _HeaderCard(
+          title: 'Seus habitos',
+          subtitle: 'Ocorreu um erro ao carregar.',
+        ),
+        const SizedBox(height: 14),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Erro', style: Theme.of(context).textTheme.titleMedium),
+                const SizedBox(height: 8),
+                Text(message, style: Theme.of(context).textTheme.bodySmall),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.icon(
+                    onPressed: () async {
+                      await onRetry();
+                    },
+                    icon: const Icon(Icons.refresh),
+                    label: const Text('Tentar novamente'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _HabitsEmpty extends StatelessWidget {
+  final VoidCallback? onCreateHabit;
+
+  const _HabitsEmpty({this.onCreateHabit});
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 140),
+      children: [
+        const _HeaderCard(
+          title: 'Seus habitos',
+          subtitle: 'Ainda nao ha habitos cadastrados.',
+        ),
+        const SizedBox(height: 14),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Comece agora',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Crie seu primeiro habito e acompanhe sua consistencia dia a dia.',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                const SizedBox(height: 14),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.icon(
+                    onPressed: onCreateHabit,
+                    icon: const Icon(Icons.add),
+                    label: const Text('Criar habito'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _HabitsList extends ConsumerWidget {
+  final List<dynamic> habits;
+
+  const _HabitsList({required this.habits});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final ctrl = ref.read(homeControllerProvider.notifier);
+    final keys = ctrl.last7DateKeys();
+
+    return ListView.separated(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 120),
+      itemCount: habits.length + 1,
+      separatorBuilder: (context, index) => const SizedBox(height: 10),
+      itemBuilder: (context, index) {
+        if (index == 0) {
+          return const _HeaderCard(
+            title: 'Seus habitos',
+            subtitle: 'Ultimos 7 dias. Puxe para atualizar.',
+          );
+        }
+
+        final h = habits[index - 1];
+        final id = _idOf(h);
+        final title = _titleOf(h);
+        final diff = _difficultyOf(h);
+        final flags = keys
+            .map((dateKey) => ctrl.isChecked7d(id, dateKey))
+            .toList(growable: false);
+        final done7 = flags.where((v) => v).length;
+
+        final card = _HabitCard(
+          title: title,
+          difficulty: diff,
+          done7: done7,
+          weekFlags: flags,
+          onTap: () {
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => HabitDetailsPage(
+                  habitId: id,
+                  title: title,
+                  difficulty: diff,
+                ),
+              ),
+            );
+          },
+        );
+
+        if (id.isNotEmpty) {
+          return Dismissible(
+            key: ValueKey(id),
+            direction: DismissDirection.endToStart,
+            confirmDismiss: (_) => _confirmDelete(context, title),
+            onDismissed: (_) {
+              ref.read(homeControllerProvider.notifier).deleteHabit(id);
+            },
+            background: const SizedBox.shrink(),
+            secondaryBackground: Container(
+              alignment: Alignment.centerRight,
+              padding: const EdgeInsets.only(right: 16),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.error.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(
+                Icons.delete_outline,
+                color: Theme.of(context).colorScheme.error,
+              ),
+            ),
+            child: card,
+          );
+        }
+
+        return card;
+      },
+    );
+  }
+
+  Future<bool> _confirmDelete(BuildContext context, String title) async {
+    return await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Excluir habito'),
+            content: Text('Deseja excluir "$title"?'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancelar'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Excluir'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+  }
+}
+
+class _HeaderCard extends StatelessWidget {
+  final String title;
+  final String subtitle;
+
+  const _HeaderCard({required this.title, required this.subtitle});
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 10,
+              height: 44,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(10),
+                color: Theme.of(context).colorScheme.primary.withOpacity(0.75),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: Theme.of(context).textTheme.titleMedium),
+                  const SizedBox(height: 4),
+                  Text(subtitle, style: Theme.of(context).textTheme.bodySmall),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _HabitCard extends StatelessWidget {
+  final String title;
+  final int difficulty;
+  final int done7;
+  final List<bool> weekFlags;
+  final VoidCallback onTap;
+
+  const _HabitCard({
+    required this.title,
+    required this.difficulty,
+    required this.done7,
+    required this.weekFlags,
+    required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      alignment: alignLeft ? Alignment.centerLeft : Alignment.centerRight,
-      padding: const EdgeInsets.symmetric(horizontal: 18),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(18),
-        boxShadow: [
-          BoxShadow(
-            blurRadius: 18,
-            spreadRadius: -6,
-            offset: Offset(0, 10),
-            color: Colors.black12,
+    final cs = Theme.of(context).colorScheme;
+
+    return Card(
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(14),
+                  color: cs.primary.withOpacity(0.10),
+                ),
+                child: Icon(Icons.check_circle_outline, color: cs.primary),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title, style: Theme.of(context).textTheme.titleSmall),
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        Text(
+                          'Dificuldade: $difficulty',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                        const Spacer(),
+                        _CountPill(done7: done7),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    _WeekDots(flags: weekFlags),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Icon(Icons.chevron_right, color: cs.onSurface.withOpacity(0.6)),
+            ],
           ),
-        ],
-        gradient: LinearGradient(
-          colors: [
-            Theme.of(context).colorScheme.primary.withOpacity(0.25),
-            Theme.of(context).colorScheme.error.withOpacity(0.25),
-          ],
         ),
-      ),
-      child: Row(
-        mainAxisAlignment: alignLeft
-            ? MainAxisAlignment.start
-            : MainAxisAlignment.end,
-        children: [
-          if (!alignLeft) ...[
-            Text(label, style: const TextStyle(fontWeight: FontWeight.w700)),
-            const SizedBox(width: 8),
-          ],
-          Icon(icon),
-          if (alignLeft) ...[
-            const SizedBox(width: 8),
-            Text(label, style: const TextStyle(fontWeight: FontWeight.w700)),
-          ],
-        ],
       ),
     );
   }
+}
+
+class _CountPill extends StatelessWidget {
+  final int done7;
+
+  const _CountPill({required this.done7});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(999),
+        color: Theme.of(context).colorScheme.primary.withOpacity(0.10),
+      ),
+      child: Text('$done7/7', style: Theme.of(context).textTheme.labelMedium),
+    );
+  }
+}
+
+class _WeekDots extends StatelessWidget {
+  final List<bool> flags;
+
+  const _WeekDots({required this.flags});
+
+  @override
+  Widget build(BuildContext context) {
+    final on = Theme.of(context).colorScheme.primary.withOpacity(0.85);
+    final off = Theme.of(context).colorScheme.onSurface.withOpacity(0.10);
+
+    return Row(
+      children: [
+        for (var i = 0; i < flags.length; i++) ...[
+          Container(
+            width: 12,
+            height: 12,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: flags[i] ? on : off,
+            ),
+          ),
+          if (i < flags.length - 1) const SizedBox(width: 8),
+        ],
+      ],
+    );
+  }
+}
+
+class _SkeletonCard extends StatelessWidget {
+  const _SkeletonCard();
+
+  @override
+  Widget build(BuildContext context) {
+    final base = Theme.of(context).colorScheme.onSurface.withOpacity(0.06);
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Row(
+          children: [
+            Container(
+              width: 10,
+              height: 44,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(10),
+                color: base,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    height: 14,
+                    width: double.infinity,
+                    decoration: BoxDecoration(
+                      color: base,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Container(
+                    height: 12,
+                    width: 120,
+                    decoration: BoxDecoration(
+                      color: base,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+String _titleOf(dynamic h) {
+  try {
+    final v = (h as dynamic).title;
+    if (v != null) return v.toString();
+  } catch (_) {}
+  try {
+    final v = (h as dynamic).name;
+    if (v != null) return v.toString();
+  } catch (_) {}
+  try {
+    final m = (h as dynamic).toJson();
+    if (m is Map && m['title'] != null) return m['title'].toString();
+    if (m is Map && m['name'] != null) return m['name'].toString();
+  } catch (_) {}
+  if (h is Map) {
+    if (h['title'] != null) return h['title'].toString();
+    if (h['name'] != null) return h['name'].toString();
+  }
+  return 'Habito';
+}
+
+String _idOf(dynamic h) {
+  try {
+    final v = (h as dynamic).id;
+    if (v != null) return v.toString();
+  } catch (_) {}
+  try {
+    final v = (h as dynamic).habitId;
+    if (v != null) return v.toString();
+  } catch (_) {}
+  try {
+    final m = (h as dynamic).toJson();
+    if (m is Map && m['id'] != null) return m['id'].toString();
+    if (m is Map && m['habitId'] != null) return m['habitId'].toString();
+  } catch (_) {}
+  if (h is Map) {
+    if (h['id'] != null) return h['id'].toString();
+    if (h['habitId'] != null) return h['habitId'].toString();
+  }
+  return '';
+}
+
+int _difficultyOf(dynamic h) {
+  try {
+    final v = (h as dynamic).difficulty;
+    if (v is int) return v;
+    if (v != null) return int.tryParse(v.toString()) ?? 1;
+  } catch (_) {}
+  try {
+    final m = (h as dynamic).toJson();
+    if (m is Map && m['difficulty'] != null) {
+      return int.tryParse(m['difficulty'].toString()) ?? 1;
+    }
+  } catch (_) {}
+  if (h is Map && h['difficulty'] != null) {
+    return int.tryParse(h['difficulty'].toString()) ?? 1;
+  }
+  return 1;
 }

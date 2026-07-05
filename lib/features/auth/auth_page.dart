@@ -1,51 +1,32 @@
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-class AuthPage extends StatefulWidget {
+import '../../app/providers.dart';
+
+class AuthPage extends ConsumerStatefulWidget {
   const AuthPage({super.key});
 
   @override
-  State<AuthPage> createState() => _AuthPageState();
+  ConsumerState<AuthPage> createState() => _AuthPageState();
 }
 
-class _AuthPageState extends State<AuthPage> {
-  final _email = TextEditingController();
+class _AuthPageState extends ConsumerState<AuthPage> {
+  final _login = TextEditingController();
   final _password = TextEditingController();
-  bool _loading = false;
   String? _error;
 
-  Future<void> _signin() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
-    try {
-      await Supabase.instance.client.auth.signInWithPassword(
-        email: _email.text.trim(),
-        password: _password.text.trim(),
-      );
-    } catch (e) {
-      setState(() => _error = e.toString());
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
+  @override
+  void dispose() {
+    _login.dispose();
+    _password.dispose();
+    super.dispose();
   }
 
-  Future<void> _signup() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
-    try {
-      await Supabase.instance.client.auth.signUp(
-        email: _email.text.trim(),
-        password: _password.text.trim(),
-      );
-    } catch (e) {
-      setState(() => _error = e.toString());
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
+  void _signin() {
+    final ok = ref
+        .read(authControllerProvider.notifier)
+        .signIn(_login.text, _password.text);
+    setState(() => _error = ok ? null : 'Login ou senha inválidos');
   }
 
   @override
@@ -57,15 +38,15 @@ class _AuthPageState extends State<AuthPage> {
         child: Column(
           children: [
             TextField(
-              controller: _email,
-              decoration: const InputDecoration(labelText: 'Email'),
-              keyboardType: TextInputType.emailAddress,
+              controller: _login,
+              decoration: const InputDecoration(labelText: 'Login'),
             ),
             const SizedBox(height: 12),
             TextField(
               controller: _password,
               decoration: const InputDecoration(labelText: 'Senha'),
               obscureText: true,
+              onSubmitted: (_) => _signin(),
             ),
             const SizedBox(height: 16),
             if (_error != null) ...[
@@ -75,22 +56,17 @@ class _AuthPageState extends State<AuthPage> {
               ),
               const SizedBox(height: 12),
             ],
-            Row(
-              children: [
-                Expanded(
-                  child: FilledButton(
-                    onPressed: _loading ? null : _signin,
-                    child: _loading ? const Text('...') : const Text('Entrar'),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: _loading ? null : _signup,
-                    child: const Text('Criar conta'),
-                  ),
-                ),
-              ],
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                onPressed: _signin,
+                child: const Text('Entrar'),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Login local: admin / admin',
+              style: Theme.of(context).textTheme.bodySmall,
             ),
           ],
         ),

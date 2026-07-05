@@ -86,6 +86,53 @@ class FakeHabitRepository implements HabitRepository {
   }
 
   @override
+  Future<void> setCheckinForDateKey({
+    required String habitId,
+    required String dateKey,
+  }) async {
+    final map = _checkinsByHabitId.putIfAbsent(habitId, () => <String, int>{});
+    map[dateKey] = 1;
+  }
+
+  @override
+  Future<Set<String>> listCheckedHabitIdsForDateKey({
+    required String dateKey,
+  }) async {
+    final out = <String>{};
+    _checkinsByHabitId.forEach((habitId, byDate) {
+      final status = byDate[dateKey] ?? 0;
+      if (status == 1 || status == 2) out.add(habitId);
+    });
+    return out;
+  }
+
+  @override
+  Future<Set<String>> listCheckedPairsForDateKeys({
+    required List<String> dateKeys,
+  }) async {
+    final keys = dateKeys.toSet();
+    final out = <String>{};
+    _checkinsByHabitId.forEach((habitId, byDate) {
+      byDate.forEach((dateKey, status) {
+        if (!keys.contains(dateKey)) return;
+        if (status == 1 || status == 2) {
+          out.add('$habitId|$dateKey');
+        }
+      });
+    });
+    return out;
+  }
+
+  @override
+  Future<void> deleteCheckinForDateKey({
+    required String habitId,
+    required String dateKey,
+  }) async {
+    final map = _checkinsByHabitId[habitId];
+    map?.remove(dateKey);
+  }
+
+  @override
   Future<void> upsertCheckinForDateKey(
     String habitId,
     String dateKey,

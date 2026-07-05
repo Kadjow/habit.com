@@ -1,44 +1,57 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
-import '../data/repositories/habit_repository_supabase.dart';
+import '../data/repositories/habit_repository_local.dart';
 import '../domain/repositories/habit_repository.dart';
 
-final supabaseClientProvider = Provider<SupabaseClient>((ref) {
-  return Supabase.instance.client;
+/// Instância de SharedPreferences. Sobrescrita no main() (bootstrap).
+final sharedPreferencesProvider = Provider<SharedPreferences>((ref) {
+  throw UnimplementedError('sharedPreferencesProvider deve ser sobrescrito no main()');
 });
 
 final habitRepositoryProvider = Provider<HabitRepository>((ref) {
-  final client = ref.watch(supabaseClientProvider);
-  return HabitRepositorySupabase(client);
+  return LocalHabitRepository(ref.watch(sharedPreferencesProvider));
 });
 
-/// Stream de sessao do Supabase.
-/// Importante: isso muda quando voce faz login/logout e nos permite resetar estado do app.
-final authSessionProvider = StreamProvider<Session?>((ref) async* {
-  final auth = Supabase.instance.client.auth;
-  yield auth.currentSession;
-  await for (final event in auth.onAuthStateChange) {
-    yield event.session;
+/// Usuário logado localmente (null = deslogado). Sem backend.
+class LocalUser {
+  const LocalUser({required this.id, required this.login});
+  final String id;
+  final String login;
+}
+
+/// Auth 100% local. Login fixo: admin / admin.
+class AuthController extends StateNotifier<LocalUser?> {
+  AuthController() : super(null);
+
+  static const String login = 'admin';
+  static const String password = 'admin';
+  static const String _userId = 'local-admin';
+
+  /// Retorna true se as credenciais batem.
+  bool signIn(String user, String pass) {
+    if (user.trim() == login && pass == password) {
+      state = const LocalUser(id: _userId, login: login);
+      return true;
+    }
+    return false;
   }
-});
 
-/// Sessao atual (null se deslogado)
-final sessionProvider = Provider<Session?>((ref) {
-  return ref.watch(authSessionProvider).value;
-});
+  void signOut() => state = null;
+}
 
-/// userId atual (null se deslogado)
+final authControllerProvider =
+    StateNotifierProvider<AuthController, LocalUser?>((ref) => AuthController());
+
+/// userId atual (null se deslogado). Recria HomeController no login/logout.
 final userIdProvider = Provider<String?>((ref) {
-  return ref.watch(sessionProvider)?.user.id;
+  return ref.watch(authControllerProvider)?.id;
 });
 
 final authUserIdProvider = Provider<String?>((ref) {
-  final session = ref.watch(authSessionProvider).value;
-  return session?.user.id;
+  return ref.watch(authControllerProvider)?.id;
 });
 
 final authUserEmailProvider = Provider<String?>((ref) {
-  final session = ref.watch(authSessionProvider).value;
-  return session?.user.email;
+  return ref.watch(authControllerProvider)?.login;
 });

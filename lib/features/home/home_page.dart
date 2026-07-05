@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../app/providers.dart';
 import 'home_controller.dart';
@@ -14,60 +13,52 @@ class HomePage extends ConsumerStatefulWidget {
 }
 
 class _HomePageState extends ConsumerState<HomePage> {
-  bool _didLoadOnce = false;
-
+  bool _didInitialLoad = false;
   @override
   void initState() {
     super.initState();
-
-    // Dispara o load uma única vez, com segurança contra dispose.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      if (_didLoadOnce) return;
-      _didLoadOnce = true;
-
-      final controller = ref.read(homeControllerProvider.notifier);
-      final value = ref.read(homeControllerProvider);
-
-      // Só carrega se ainda não há dados.
-      if (value is AsyncLoading || value.value == null) {
-        controller.load();
-      }
-    });
   }
 
   @override
   Widget build(BuildContext context) {
+    ref.listen<String?>(authUserIdProvider, (prev, next) {
+      if (_didInitialLoad) return;
+      if (next == null || next.isEmpty) return;
+      _didInitialLoad = true;
+      Future.microtask(() async {
+        final notifier = ref.read(homeControllerProvider.notifier);
+        await notifier.load();
+        await notifier.refreshTodayStatus();
+        await notifier.refreshWeekStatus();
+      });
+    });
+
+    final uidNow = ref.watch(authUserIdProvider);
+    if (!_didInitialLoad && uidNow != null && uidNow.isNotEmpty) {
+      _didInitialLoad = true;
+      Future.microtask(() async {
+        final notifier = ref.read(homeControllerProvider.notifier);
+        await notifier.load();
+        await notifier.refreshTodayStatus();
+        await notifier.refreshWeekStatus();
+      });
+    }
+
     return Scaffold(
       appBar: AppBar(
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Habits'),
-            Consumer(
-              builder: (context, ref, _) {
-                final uid = ref.watch(authUserIdProvider);
-                final email = ref.watch(authUserEmailProvider);
-                return Text(
-                  '${email ?? '-'} | ${uid?.substring(0, 8) ?? '-'}',
-                  style: Theme.of(context).textTheme.labelSmall,
-                );
-              },
-            ),
-          ],
-        ),
+        title: const Text('Habits'),
         actions: [
           IconButton(
-            onPressed: () async {
-              await Supabase.instance.client.auth.signOut(
-                scope: SignOutScope.global,
-              );
+            onPressed: () {
+              ref.read(authControllerProvider.notifier).signOut();
             },
             icon: const Icon(Icons.logout),
           ),
         ],
       ),
-      body: const HomeHabitsV2(),
+      body: HomeHabitsV2(
+        onCreateHabit: () => _showCreateHabitSheet(context, ref),
+      ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _showCreateHabitSheet(context, ref),
         label: const Text('Novo habito'),

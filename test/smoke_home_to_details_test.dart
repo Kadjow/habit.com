@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'test_app.dart';
 
@@ -14,13 +13,6 @@ void main() {
     TestWidgetsFlutterBinding.ensureInitialized();
 
     SharedPreferences.setMockInitialValues(<String, Object>{});
-
-    // Evita: "You must initialize the supabase instance before calling Supabase.instance"
-    // URL e key dummy (nao precisamos de rede).
-    await Supabase.initialize(
-      url: 'https://example.supabase.co',
-      anonKey: 'anon-key',
-    );
   });
 
   testWidgets('Smoke: Home -> Details (tap) sem exceptions/overflow', (tester) async {

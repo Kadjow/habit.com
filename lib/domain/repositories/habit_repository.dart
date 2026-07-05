@@ -18,6 +18,23 @@ abstract class HabitRepository {
     int days,
     String todayDateKey,
   );
+
+  Future<void> setCheckinForDateKey({
+    required String habitId,
+    required String dateKey,
+  }) => upsertCheckinForDateKey(habitId, dateKey, 1);
+
+  Future<Set<String>> listCheckedHabitIdsForDateKey({required String dateKey});
+
+  Future<Set<String>> listCheckedPairsForDateKeys({
+    required List<String> dateKeys,
+  });
+
+  Future<void> deleteCheckinForDateKey({
+    required String habitId,
+    required String dateKey,
+  }) => upsertCheckinForDateKey(habitId, dateKey, 0);
+
   Future<CheckIn?> getCheckinForDate(String habitId, String dateKey);
   Future<void> upsertCheckinForDate(String habitId, String dateKey, int status);
   Future<void> upsertCheckinForDateKey(
